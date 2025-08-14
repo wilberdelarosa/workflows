@@ -1,0 +1,1112 @@
+{
+  "name": "My workflow 6",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "5bfeb64c-8556-450d-ac31-ddf20d7b2eb5",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2224,
+        -336
+      ],
+      "webhookId": "construmax-bot-v2",
+      "credentials": {
+        "telegramApi": {
+          "id": "0cS1NXwkCYeYHNOb",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Telegram Trigger').item.json.message.chat.id }}"
+      },
+      "id": "6d43ce21-f664-464a-afee-55d990a4245c",
+      "name": "Simple Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -912,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "afd8565f-8398-49e8-aaae-2a2534e46669",
+      "name": "Groq Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -1040,
+        960
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "3jmMFvq9ZHfrrvTP",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "👋 Hola, soy *Manuel Herrera* de *Construmax EIRL*.\n\nPuedo ayudarte a:\n• Ver catálogo y precios\n• Validar stock\n• Generar *cotización* (chat o PDF)\n\nEscribe, por ejemplo:\n• `catálogo`\n• `precio grava`\n• `stock de arena`\n• `cotiza 10 m3 de grava gris a nombre de Wilber, 809-555-0000, Friusa`\n• `cotización PDF`\n",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "3b8a4186-7450-48ab-97d3-f6f2784e9575",
+      "name": "Bienvenida",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -1568,
+        -64
+      ],
+      "webhookId": "5054850b-28ba-449c-b518-e5725fcf65ac",
+      "credentials": {
+        "telegramApi": {
+          "id": "0cS1NXwkCYeYHNOb",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un router de intención para un bot de materiales de construcción (Construmax / Alito EIRL).\nTu única tarea es CLASIFICAR y EXTRAER ENTIDADES del mensaje del usuario.\n\nResponde **SOLO** con JSON válido (sin texto adicional) siguiendo ESTE esquema exacto:\n{\n  \"intent\": \"help|catalogo|precio|stock|cotizacion_chat|cotizacion_pdf\",\n  \"entities\": {\n    \"material\": null | string,\n    \"cantidad\": null | number,\n    \"unidad\": null | \"m3\" | \"m³\" | \"unidad\" | \"dia\" | \"día\",\n    \"nombre\": null | string,\n    \"telefono\": null | string,\n    \"direccion\": null | string\n  }\n}\n\nREGLAS:\n- Usa SOLO uno de los intents permitidos.\n- Normaliza a minúsculas.\n- Extrae \"material\" si menciona grava, arena, caliche, grava gris, grava caliza, grava triturada blanca, etc.\n- Si pide \"PDF\", el intent es \"cotizacion_pdf\".\n- Si dice \"cotiza\", \"presupuesto\", \"cotización\" (sin mencionar PDF), es \"cotizacion_chat\".\n- \"precio\", \"cuánto cuesta\", \"tarifa\" → \"precio\".\n- \"stock\", \"disponibilidad\", \"hay existencias\" → \"stock\".\n- \"catálogo\", \"lista de productos\", \"¿qué tienen?\" → \"catalogo\".\n- Si es saludo, duda general u otra cosa → \"help\".\n\nEXTRACCIÓN:\n- cantidad: número (convierte “10m3”, “10 m³” a 10). \"unidad\": m3/m³ si aplica.\n- nombre: si detectas “soy X”, “a nombre de X”.\n- telefono: acepta formatos con espacios, guiones o sin separadores.\n- direccion: cualquier referencia de zona/barrio/ciudad.\n\nSi no puedes extraer un campo, devuelve null (no inventes).\n\nMensaje del usuario:\n {{ $('Telegram Trigger').item.json.message.text }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "Responde SOLO con JSON válido. Sé estricto."
+        }
+      },
+      "id": "5ffc6e91-b1d0-442c-a593-f60104ee9b22",
+      "name": "Clasificar Intención (AI)",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -2064,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.output ?? $input.first().json.text ?? $input.first().json.response ?? '';\nif (typeof raw === 'object' && raw !== null) raw = JSON.stringify(raw);\nraw = String(raw).trim()\n  .replace(/^```(?:json)?/i, '')\n  .replace(/```$/i, '')\n  .trim();\n\nlet p = {};\ntry { p = JSON.parse(raw); } catch { p = {}; }\n\nconst allowed = new Set(['help','catalogo','precio','stock','cotizacion_chat','cotizacion_pdf']);\nlet intent = (p.intent || '').toString().trim().toLowerCase();\nif (!allowed.has(intent)) intent = 'help';\n\nconst e = p.entities || {};\nreturn [{\n  json: {\n    intent,\n    entities: {\n      material:  e.material  ?? null,\n      cantidad:  e.cantidad  ?? null,\n      unidad:    e.unidad    ?? null,\n      nombre:    e.nombre    ?? null,\n      telefono:  e.telefono  ?? null,\n      direccion: e.direccion ?? null\n    }\n  }\n}];\n"
+      },
+      "id": "bb5f2020-e15b-4a3c-9e85-01abf8b39c77",
+      "name": "Parse Intent JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1552,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "📋 *¿Qué puedo hacer?*\n• Catálogo: escribe `catálogo`\n• Precio: `precio grava`\n• Stock: `stock de arena`\n• Cotizar en chat: `cotiza 10 m3 de grava gris ...`\n• Cotización PDF: `cotización PDF` (te pediré datos si faltan)\n",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "09833dfe-7b3c-400f-89ba-5108ff67e0a5",
+      "name": "Ayuda",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -880,
+        -720
+      ],
+      "webhookId": "1fc9e5fc-10a5-424f-a868-e88a4a779a7c",
+      "credentials": {
+        "telegramApi": {
+          "id": "0cS1NXwkCYeYHNOb",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "16_j7l-qc2jw5YobRcts85aenlNkQFRzwohhAH8o6h3g",
+          "mode": "list",
+          "cachedResultName": "GOOGLE_SHEETS_ID_CONSTRUMAX",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16_j7l-qc2jw5YobRcts85aenlNkQFRzwohhAH8o6h3g/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1852205406,
+          "mode": "list",
+          "cachedResultName": "Catalogo0",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16_j7l-qc2jw5YobRcts85aenlNkQFRzwohhAH8o6h3g/edit#gid=1852205406"
+        },
+        "options": {}
+      },
+      "id": "610b459a-5b3d-47ee-b19c-560853227c0a",
+      "name": "Leer Catálogo (Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        320,
+        -432
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "EfYKXXPrUcBH56ds",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1) Todas las filas que vienen del nodo \"Leer Catálogo (Sheets)\"\nconst rows = $input.all().map(({ json }) => json ?? {});\n\n// 2) Recuperar el material detectado por el nodo \"Parse Intent JSON\"\nconst intentObj = $item(0, 'Parse Intent JSON').json || {};\n// normaliza: minúsculas + sin tildes + ñ -> n\nconst mat = (intentObj.entities?.material || '')\n  .toString()\n  .toLowerCase()\n  .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')\n  .replace(/ñ/g,'n')\n  .trim();\n\n// 3) Filtrado tolerante\n// Si tu hoja tiene columna 'slug', preferimos slug; si no, usamos 'material'\nconst norm = (s) => String(s || '')\n  .toLowerCase()\n  .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')\n  .replace(/ñ/g,'n')\n  .trim();\n\nconst filtered = mat\n  ? rows.filter(r => norm(r.slug ?? r.material).includes(mat))\n  : rows;\n\n// 4) Armar líneas de respuesta\nconst lines = filtered.map(r => {\n  const itbis = (String(r.itbis).toLowerCase() === 'true' || r.itbis === true) ? ' + ITBIS' : '';\n  const stock = (r.stock != null && r.stock !== '') ? ` | Stock: ${r.stock}` : '';\n  return `• ${r.material}: ${r.precio}${itbis}${stock}`;\n});\n\n// 5) Mensaje final\nconst msg = lines.length\n  ? lines.join('\\n')\n  : 'No encontré ese material en el catálogo. Escribe \"catálogo\" para ver la lista completa.';\n\nreturn [{ json: { msg } }];\n"
+      },
+      "id": "f85c7c7c-3cbd-4b11-82d0-55fb4db3f536",
+      "name": "Formatear Respuesta Catálogo/Precio/Stock",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        -384
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "chatId": "1380183859",
+        "text": "={{ $('Clasificar Intención (AI)').item.json.output }}",
+        "additionalFields": {}
+      },
+      "id": "d8f4e0b8-e94b-468b-a68e-1c0642b60246",
+      "name": "Enviar Respuesta",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1024,
+        -384
+      ],
+      "webhookId": "a6301415-4d3f-4621-9c0f-9f7780ff4029",
+      "credentials": {
+        "telegramApi": {
+          "id": "0cS1NXwkCYeYHNOb",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "Convierte el mensaje del usuario en JSON de cotización.\nResponde SOLO con JSON válido:\n{\n  \"cliente\": {\n    \"nombre\": \"\",\n    \"telefono\": \"\",\n    \"direccion\": \"\"\n  },\n  \"items\": [ {\"material\":\"\",\"cantidad\":0,\"unidad\":\"m3|dia\"} ]\n}\nMensaje: {{ $('Telegram Trigger').item.json.message.text }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "Responde únicamente con JSON válido, sin texto extra."
+        }
+      },
+      "id": "f0c3115f-02bd-4a11-9114-e81e0dfd1824",
+      "name": "Extraer Datos (AI→JSON)",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -368,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let data = {};\ntry { data = JSON.parse($json.output || '{}'); } catch(e){ data = {}; }\nconst cliente = data.cliente||{};\nconst items = Array.isArray(data.items)? data.items: [];\nconst missing = [];\nif (!cliente.nombre) missing.push('nombre');\nif (!cliente.telefono) missing.push('teléfono');\nif (!cliente.direccion) missing.push('dirección');\nif (!items.length) missing.push('items (material,cantidad,unidad)');\nreturn [{json: {cliente, items, missing}}];\n"
+      },
+      "id": "c41639ac-4ba2-4a8f-bcf5-c117378c621e",
+      "name": "Parse JSON Cotización",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "rightValue": "0",
+              "leftValue": "={{ $json.missing.length }}",
+              "operator": {
+                "type": "number",
+                "operation": "notEqual"
+              },
+              "id": "3c7378b9-c019-4ab9-bd95-aff4331f50b3"
+            },
+            {
+              "id": "3fea17d7-0e06-441e-824f-df12b80c9aa5",
+              "leftValue": "",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c3906ea2-056f-4c1e-b142-eba7fced9c9a",
+      "name": "¿Faltan datos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ 'Para continuar necesito: ' + $json.missing.join(', ') + '. Por favor envíalos y seguimos.' }}",
+        "additionalFields": {}
+      },
+      "id": "baf8a451-b21d-4a62-8899-528d570af0ca",
+      "name": "Pedir Datos Faltantes",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        560,
+        672
+      ],
+      "webhookId": "2b1843e0-7875-405d-91c6-f39f88b3150b",
+      "credentials": {
+        "telegramApi": {
+          "id": "0cS1NXwkCYeYHNOb",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "16_j7l-qc2jw5YobRcts85aenlNkQFRzwohhAH8o6h3g",
+          "mode": "list",
+          "cachedResultName": "GOOGLE_SHEETS_ID_CONSTRUMAX",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16_j7l-qc2jw5YobRcts85aenlNkQFRzwohhAH8o6h3g/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1852205406,
+          "mode": "list",
+          "cachedResultName": "Catalogo0",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16_j7l-qc2jw5YobRcts85aenlNkQFRzwohhAH8o6h3g/edit#gid=1852205406"
+        },
+        "options": {}
+      },
+      "id": "164efee6-044c-43ca-b624-57db049c39f0",
+      "name": "Leer Catálogo (para cálculo)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        560,
+        816
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "EfYKXXPrUcBH56ds",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1) Filas del catálogo (vienen como 'items' desde Google Sheets -> read)\nconst catalogRows = items.map(i => i.json ?? {});\n\n// 2) Recuperar el JSON de cotización del nodo \"Parse JSON Cotización\"\n//    (aunque este node no esté conectado directamente, $item(<idx>, '<NodeName>') lo trae)\nconst parsed = $item(0, 'Parse JSON Cotización').json || {};\nconst cliente = parsed.cliente || {};\nconst orderItems = Array.isArray(parsed.items) ? parsed.items : [];\n\n// 3) Mapa de materiales del catálogo (evita warning usando Map())\nconst catMap = new Map();\nfor (const r of catalogRows) {\n  if (!r || !r.material) continue;\n  catMap.set(String(r.material).toLowerCase(), {\n    material: r.material,\n    precio: Number(r.precio ?? 0),\n    itbis: (String(r.itbis).toLowerCase() === 'true' || r.itbis === true),\n  });\n}\n\n// 4) Calcular detalle\nconst detalle = [];\nlet totalGeneral = 0;\n\nfor (const it of orderItems) {\n  const key = String(it.material || '').toLowerCase();\n  const cat = catMap.get(key);\n  if (!cat) {\n    // Si no está en catálogo, lo ignoramos o podrías anotarlo para avisar al usuario\n    continue;\n  }\n  const cant = Number(it.cantidad ?? 0);\n  const precio = cat.precio;\n  const subtotal = cant * precio;\n  const impuesto = cat.itbis ? subtotal * 0.18 : 0;\n  const total = subtotal + impuesto;\n  totalGeneral += total;\n\n  detalle.push({\n    material: cat.material,\n    cantidad: cant,\n    unidad: it.unidad || 'm3',\n    precio,\n    itbis: cat.itbis,\n    subtotal,\n    impuesto,\n    total,\n  });\n}\n\n// 5) Armar salida\nconst numero = `COT-${Date.now()}`;\nconst fecha = new Date().toLocaleDateString('es-DO');\n\nconst mensaje = [\n  `📄 Cotización ${numero} (${fecha})`,\n  `Cliente: ${cliente.nombre || ''} | Tel: ${cliente.telefono || ''}`,\n  `Dirección: ${cliente.direccion || ''}`,\n  '',\n  ...detalle.map(d => `• ${d.material} — ${d.cantidad} ${d.unidad} x ${d.precio} = ${d.subtotal}${d.itbis ? ' (+ITBIS)' : ''} → ${d.total}`),\n  '',\n  `TOTAL: ${totalGeneral}`,\n].join('\\n');\n\nreturn [{\n  json: {\n    mensaje,\n    cotizacion: {\n      numero,\n      fecha,\n      cliente,\n      materiales: detalle,\n      totalGeneral,\n    }\n  }\n}];\n"
+      },
+      "id": "8404e3f2-2f53-4df9-bea8-6df2addf570e",
+      "name": "Calcular Cotización (Code)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.mensaje }}",
+        "additionalFields": {}
+      },
+      "id": "19fa14cb-1a27-4676-9c3e-f9c80abcf6ef",
+      "name": "Enviar Resumen (Chat)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1104,
+        1088
+      ],
+      "webhookId": "d9f84702-a34a-4a4b-afa5-b3747e9e2189",
+      "credentials": {
+        "telegramApi": {
+          "id": "0cS1NXwkCYeYHNOb",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "16_j7l-qc2jw5YobRcts85aenlNkQFRzwohhAH8o6h3g",
+          "mode": "list",
+          "cachedResultName": "GOOGLE_SHEETS_ID_CONSTRUMAX",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16_j7l-qc2jw5YobRcts85aenlNkQFRzwohhAH8o6h3g/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1097847576,
+          "mode": "list",
+          "cachedResultName": "Cotizaciones",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16_j7l-qc2jw5YobRcts85aenlNkQFRzwohhAH8o6h3g/edit#gid=1097847576"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "numero_cotizacion": "={{ $json.cotizacion.numero || $json.numero || ('COT-' + Date.now()) }}",
+            "fecha": "={{ $json.cotizacion.fecha || new Date().toLocaleDateString('es-DO') }}",
+            "materiales_json": "=={{ JSON.stringify($json.cotizacion.materiales) }}\n",
+            "total_general": "={{ $json.cotizacion.totalGeneral }}",
+            "cliente_direccion": "={{ $json.cotizacion.cliente.direccion }}",
+            "cliente_telefono": "={{ $json.cotizacion.cliente.telefono }}",
+            "cliente_nombre": "={{ $json.cotizacion.cliente.nombre }}"
+          },
+          "matchingColumns": [
+            "numero_cotizacion"
+          ],
+          "schema": [
+            {
+              "id": "numero_cotizacion",
+              "displayName": "numero_cotizacion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fecha",
+              "displayName": "fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cliente_nombre",
+              "displayName": "cliente_nombre",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cliente_telefono",
+              "displayName": "cliente_telefono",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cliente_direccion",
+              "displayName": "cliente_direccion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "total_general",
+              "displayName": "total_general",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "materiales_json",
+              "displayName": "materiales_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "017f53a5-8483-4774-a77c-0fdb3e0177b4",
+      "name": "Guardar Cotización (Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        1056,
+        1280
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "EfYKXXPrUcBH56ds",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const c = $json.cotizacion;\nconst rows = c.materiales.map(d=>`\\n<tr>\\n  <td>${d.material}</td><td>${d.cantidad} ${d.unidad}</td>\\n  <td>${d.precio}</td><td>${d.subtotal}</td><td>${d.itbis?'18%':'0%'}</td><td>${d.total}</td>\\n</tr>`).join('');\nconst html = `<!doctype html><html><head><meta charset='utf-8'>\\n<style>body{font-family:Arial;margin:24px;color:#111} h1{margin:0}\\ntable{width:100%;border-collapse:collapse;margin-top:16px}\\nth,td{border:1px solid #ddd;padding:8px;text-align:left}\\ntfoot td{font-weight:bold}\\n</style></head><body>\\n<h1>Construmax EIRL</h1>\\n<p>Hola ${c.cliente.nombre}, soy Manuel Herrera, y esta es tu cotización personalizada.</p>\\n<p><b>Cotización:</b> ${c.numero} — <b>Fecha:</b> ${c.fecha}</p>\\n<p><b>Tel:</b> ${c.cliente.telefono} — <b>Dirección:</b> ${c.cliente.direccion}</p>\\n<table><thead><tr><th>Material</th><th>Cant.</th><th>Precio</th><th>Subtotal</th><th>ITBIS</th><th>Total</th></tr></thead>\\n<tbody>${rows}</tbody>\\n<tfoot><tr><td colspan='5'>TOTAL</td><td>${c.totalGeneral}</td></tr></tfoot>\\n</table>\\n<p style='margin-top:24px;font-size:12px;color:#555'>Validez: 7 días. Precios sujetos a cambios según disponibilidad y zona de entrega.</p>\\n</body></html>`;\nreturn [{json:{html}}];\n"
+      },
+      "id": "2dcbaab7-0f85-4e18-bffb-a0f3d873131a",
+      "name": "Construir HTML (Code)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "URL/HTML to PDF",
+        "convertType": "htmlToPDF",
+        "html": "={{ $json.html }}",
+        "advancedOptions": {}
+      },
+      "id": "d8225702-b052-4b16-bf24-ba4e68044646",
+      "name": "PDFco Api",
+      "type": "n8n-nodes-pdfco.PDFco Api",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        880
+      ],
+      "credentials": {
+        "pdfcoApi": {
+          "id": "bD1BFRACKTZ6eKe3",
+          "name": "PDF.co account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "file": "={{ $json.url }}",
+        "additionalFields": {}
+      },
+      "id": "c77bc3ad-baf6-463e-a015-51260edbe52b",
+      "name": "Enviar PDF (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1728,
+        880
+      ],
+      "webhookId": "47f3a43f-26b3-4111-a5c0-67b5d36cd334",
+      "credentials": {
+        "telegramApi": {
+          "id": "0cS1NXwkCYeYHNOb",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "outputsAmount": 3
+      },
+      "id": "38795522-1377-4999-acf4-b1b97f20c910",
+      "name": "Switch tipo de cotización",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        800,
+        1008
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "No entendí. Escribe `catálogo`, `precio grava`, `stock arena`, `cotiza 10 m3 de grava ...` o `cotización PDF`.",
+        "additionalFields": {}
+      },
+      "id": "00d79fc3-c030-4d6f-93e7-20faf2fe10e3",
+      "name": "Desconocido → Ayuda",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -304,
+        0
+      ],
+      "webhookId": "9a9bb0ea-9af9-4b2e-a5ee-1885c91bdac9",
+      "credentials": {
+        "telegramApi": {
+          "id": "0cS1NXwkCYeYHNOb",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "fb126351-5a24-4b81-be8c-734c68ad490a",
+      "name": "_NoOp_help",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        -1088,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "33ec6a92-15ac-4477-8024-c2e9a93a55a5",
+      "name": "_NoOp_catalogo",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        -688
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "e91867dd-3c3d-489b-8d3f-9094803c782e",
+      "name": "_NoOp_precio",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "38a4d840-1dcf-4680-88c3-8593239b85aa",
+      "name": "_NoOp_stock",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "9c120cab-70e4-465f-b79d-246f4c35f5eb",
+      "name": "_NoOp_cotizacion_chat",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        -288
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "77ea8e72-1478-43c7-9e51-5b67877107f3",
+      "name": "_NoOp_cotizacion_pdf",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        -1168,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "cf294554-2e7c-41df-97c1-90b22c091aa2",
+      "name": "_NoOp_otherwise",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        -544,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "=={{ ($json.intent ?? $item(0, 'Parse Intent JSON').json.intent ?? 'help').toString().trim().toLowerCase() }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "=\"=help\"",
+              "outputKey": "=\"_NoOp_help\""
+            },
+            {
+              "value2": "=1 \"catalogo\"",
+              "outputKey": "\"catalogo\""
+            },
+            {
+              "value2": "={{3}}",
+              "outputKey": "\"precio\""
+            },
+            {
+              "value2": 1,
+              "outputKey": "_NoOp_stock\""
+            },
+            {
+              "value2": "\"cotizacionpdf\"",
+              "outputKey": "\"_NoOp_cotizacion_pdf\""
+            },
+            {
+              "outputKey": "_NoOp_cotizacion_pdf\""
+            }
+          ]
+        }
+      },
+      "id": "21fc8bfc-4140-46e0-bee9-38f5cc63158d",
+      "name": "Switch Intención1",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        -1408,
+        -672
+      ],
+      "retryOnFail": false,
+      "executeOnce": false,
+      "alwaysOutputData": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=estare haciendo peticiones sobre una tabla precisamente esta, prepara un mensaje segun lo que este solicitando en base a esta tabla\neso es lo que se pide\n{{ $('Telegram Trigger').item.json.message.text }}\n\n{{ $('Clasificar Intención (AI)').item.json.output }}\n{{ $json.row_number }},{{ $json.material }},{{ $json['precio\t'] }},{{ $json['slug '] }},{{ $json['precio\t']  }},{{ $json['slug '] }}\n\n\nlo que se desea saber  \n\n\n\nformatealo para telegram",
+        "options": {
+          "systemMessage": "=Responde únicamente con JSON válido, sin texto extra. para telegram "
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        576,
+        -192
+      ],
+      "id": "f059ad1f-9520-4cd6-8235-e35beb0d57b1",
+      "name": "interprete respuesta"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Clasificar Intención (AI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Clasificar Intención (AI)",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Extraer Datos (AI→JSON)",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "interprete respuesta",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Clasificar Intención (AI)",
+            "type": "ai_memory",
+            "index": 0
+          },
+          {
+            "node": "Extraer Datos (AI→JSON)",
+            "type": "ai_memory",
+            "index": 0
+          },
+          {
+            "node": "interprete respuesta",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar Intención (AI)": {
+      "main": [
+        [
+          {
+            "node": "Parse Intent JSON",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Bienvenida",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Intent JSON": {
+      "main": [
+        [
+          {
+            "node": "Switch Intención1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Catálogo (Sheets)": {
+      "main": [
+        [
+          {
+            "node": "interprete respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Respuesta Catálogo/Precio/Stock": {
+      "main": [
+        [
+          {
+            "node": "Enviar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer Datos (AI→JSON)": {
+      "main": [
+        [
+          {
+            "node": "Parse JSON Cotización",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse JSON Cotización": {
+      "main": [
+        [
+          {
+            "node": "¿Faltan datos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Faltan datos?": {
+      "main": [
+        [
+          {
+            "node": "Pedir Datos Faltantes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Leer Catálogo (para cálculo)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Catálogo (para cálculo)": {
+      "main": [
+        [
+          {
+            "node": "Calcular Cotización (Code)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Cotización (Code)": {
+      "main": [
+        [
+          {
+            "node": "Switch tipo de cotización",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch tipo de cotización": {
+      "main": [
+        [
+          {
+            "node": "Construir HTML (Code)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar Resumen (Chat)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Guardar Cotización (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Construir HTML (Code)": {
+      "main": [
+        [
+          {
+            "node": "PDFco Api",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDFco Api": {
+      "main": [
+        [
+          {
+            "node": "Enviar PDF (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bienvenida": {
+      "main": [
+        []
+      ]
+    },
+    "Guardar Cotización (Sheets)": {
+      "main": [
+        []
+      ]
+    },
+    "Switch Intención1": {
+      "main": [
+        [
+          {
+            "node": "_NoOp_help",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "_NoOp_catalogo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "_NoOp_precio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "_NoOp_stock",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "_NoOp_cotizacion_chat",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "_NoOp_cotizacion_pdf",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "_NoOp_help": {
+      "main": [
+        [
+          {
+            "node": "Ayuda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "_NoOp_catalogo": {
+      "main": [
+        [
+          {
+            "node": "Leer Catálogo (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "_NoOp_precio": {
+      "main": [
+        [
+          {
+            "node": "Leer Catálogo (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "_NoOp_stock": {
+      "main": [
+        [
+          {
+            "node": "Leer Catálogo (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "_NoOp_cotizacion_chat": {
+      "main": [
+        [
+          {
+            "node": "Leer Catálogo (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "_NoOp_cotizacion_pdf": {
+      "main": [
+        [
+          {
+            "node": "Extraer Datos (AI→JSON)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "_NoOp_otherwise": {
+      "main": [
+        [
+          {
+            "node": "Desconocido → Ayuda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "interprete respuesta": {
+      "main": [
+        [
+          {
+            "node": "Formatear Respuesta Catálogo/Precio/Stock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7022b7bb-78ed-489e-bf7a-fe2c5cf75708",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "20ead549f3c36919b86f5731cec575d69f94948e68df82e1460bc44fced0c821"
+  },
+  "id": "H5MzRnN3Oamyvb6h",
+  "tags": []
+}
